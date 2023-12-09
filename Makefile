@@ -18,22 +18,18 @@ ifneq ($(DEBUG),)
 CFLAGS += -DDEBUG -DCCAN_LIST_DEBUG -rdynamic -O0 -ggdb
 LDFLAGS += -rdynamic
 else
-ifneq ($(GDB),)
-CFLAGS += -g -ggdb -O0
-else
 CFLAGS += -O3
-endif
 endif
 
 ifneq ($(SAFEMODE),)
 CFLAGS += -DSAFEMODE
-CFLAGS += -g -O0
 endif
 
 ifneq ($(SUPPRESS_LOG),)
 CFLAGS += -DSUPPRESS_LOG
 endif
 
+# allocate tool cpu/memory from a specific numa node
 ifneq ($(NUMA_NODE),)
 CFLAGS += -DNUMA_NODE=$(NUMA_NODE)
 endif
@@ -100,11 +96,6 @@ librmem.a: $(rmem_obj)
 $(FLTRACE): $(main_obj) libs base/base.ld
 	$(LD) $(CFLAGS) $(LDFLAGS) -shared $(main_obj) -o $(FLTRACE)	\
 		librmem.a libbase.a $(JEMALLOC_STATIC_LIBS) -lpthread -lm -ldl 
-
-## tests
-$(test_targets): $(test_obj) libbase.a libruntime.a librmem.a libnet.a base/base.ld
-	$(LD) $(LDFLAGS) -o $@ $@.o libruntime.a librmem.a libnet.a libbase.a 	\
-		-lpthread -lm $(RDMA_LIBS)
 
 ## general build rules for all targets
 src = $(base_src) $(rmem_src) ${main_src}
