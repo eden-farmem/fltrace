@@ -1,6 +1,6 @@
-INC     = -I./inc
+INC     = -I./src/inc
 CFLAGS  = -g -Wall -std=gnu11 -D_GNU_SOURCE $(INC) -mssse3
-LDFLAGS = -T base/base.ld -no-pie
+LDFLAGS = -T src/base/base.ld -no-pie
 LD	= gcc
 CC	= gcc
 AR	= ar
@@ -59,18 +59,18 @@ CFLAGS += $(JEMALLOC_INC)
 #
 
 # libbase.a - the base library
-base_src = $(wildcard base/*.c)
+base_src = $(wildcard src/base/*.c)
 base_obj = $(base_src:.c=.o)
 
 # librmem.a - a remote memory library
-rmem_src = $(wildcard rmem/*.c)
+rmem_src = $(wildcard src/rmem/*.c)
 rmem_obj = $(rmem_src:.c=.o)
 
 #
 # Tool
 #
 
-main_src = $(wildcard *.c)
+main_src = $(wildcard src/*.c)
 main_obj = $(main_src:.c=.o)
 CFLAGS += -fPIC # (fltrace is a shared library)
 CFLAGS += -DKEEP_PERTHREAD_DATA
@@ -93,7 +93,7 @@ librmem.a: $(rmem_obj)
 
 # fltrace.so has to be built separately as it uses different flags
 # use "make fltrace.so"
-$(FLTRACE): $(main_obj) libs base/base.ld
+$(FLTRACE): $(main_obj) libs src/base/base.ld
 	$(LD) $(CFLAGS) $(LDFLAGS) -shared $(main_obj) -o $(FLTRACE)	\
 		librmem.a libbase.a $(JEMALLOC_STATIC_LIBS) -lpthread -lm -ldl 
 
