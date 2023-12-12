@@ -152,7 +152,7 @@ if [[ $COMMAND == "visualize" ]]; then
         python3 ${SCRIPT_DIR}/scripts/prepare_flame_graph.py -i ${report} -z -o fltrace-data-flamegraph-alloc-${pid}.dat
         ${SCRIPT_DIR}/scripts/flamegraph.pl fltrace-data-flamegraph-${pid}.dat --color=fault --width=800 > fltrace-data-flamegraph-${pid}.svg
         ${SCRIPT_DIR}/scripts/flamegraph.pl fltrace-data-flamegraph-alloc-${pid}.dat --color=fault --width=800 > fltrace-data-flamegraph-alloc-${pid}.svg
-        echo "Generated flamegraph for pid ${pid} at ./fltrace-flamegraph.svg"
+        echo "Generated flamegraph for pid ${pid} at ./fltrace-data-flamegraph-${pid}"
         echo "Generated flamegraph for pid ${pid} (Allocation-only faults) at ./fltrace-flamegraph-alloc-${pid}.svg"
     done
 fi

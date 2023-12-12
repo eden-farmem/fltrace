@@ -56,7 +56,7 @@ cat fltrace-data-stats-<pid>.out | grep -o "memory_used:\([0-9]\+\)" | tail -1  
 ./fltrace visualize
 ```
 The above commands will generate a flamegraph svg file `fltrace-data-flamegraph-<pid>.svg` which looks like this:
-![flamegraph](./flamegraph-example.png)
+![flamegraph](./flamegraph-example.svg)
 
 
 #### Acknowledgements

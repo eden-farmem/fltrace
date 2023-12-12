@@ -1,0 +1,917 @@
+<?xml version="1.0" standalone="no"?>
+<!DOCTYPE svg PUBLIC "-//W3C//DTD SVG 1.1//EN" "http://www.w3.org/Graphics/SVG/1.1/DTD/svg11.dtd">
+<svg version="1.1" width="800" height="310" onload="init(evt)" viewBox="0 0 800 310" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">
+<!-- Flame graph stack visualization. See https://github.com/brendangregg/FlameGraph for latest version, and http://www.brendangregg.com/flamegraphs.html for examples. -->
+<!-- NOTES:  -->
+<defs>
+	<linearGradient id="background" y1="0" y2="1" x1="0" x2="0" >
+		<stop stop-color="#ffffff" offset="5%" />
+		<stop stop-color="#ffffff" offset="95%" />
+	</linearGradient>
+</defs>
+<style type="text/css">
+	text { font-family:Verdana; font-size:12px; fill:rgb(0,0,0); }
+	#search, #ignorecase { opacity:0.1; cursor:pointer; }
+	#search:hover, #search.show, #ignorecase:hover, #ignorecase.show { opacity:1; }
+	#subtitle { text-anchor:middle; font-color:rgb(160,160,160); }
+	#title { text-anchor:middle; font-size:17px}
+	#unzoom { cursor:pointer; }
+	#frames > *:hover { stroke:black; stroke-width:0.5; cursor:pointer; }
+	.hide { display:none; }
+	.parent { opacity:0.5; }
+</style>
+<script type="text/ecmascript">
+<![CDATA[
+	"use strict";
+	var details, searchbtn, unzoombtn, matchedtxt, svg, searching, currentSearchTerm, ignorecase, ignorecaseBtn;
+	function init(evt) {
+		details = document.getElementById("details").firstChild;
+		searchbtn = document.getElementById("search");
+		ignorecaseBtn = document.getElementById("ignorecase");
+		unzoombtn = document.getElementById("unzoom");
+		matchedtxt = document.getElementById("matched");
+		svg = document.getElementsByTagName("svg")[0];
+		searching = 0;
+		currentSearchTerm = null;
+
+		// use GET parameters to restore a flamegraphs state.
+		var params = get_params();
+		if (params.x && params.y)
+			zoom(find_group(document.querySelector('[x="' + params.x + '"][y="' + params.y + '"]')));
+                if (params.s) search(params.s);
+	}
+
+	// event listeners
+	window.addEventListener("click", function(e) {
+		var target = find_group(e.target);
+		if (target) {
+			if (target.nodeName == "a") {
+				if (e.ctrlKey === false) return;
+				e.preventDefault();
+			}
+			if (target.classList.contains("parent")) unzoom(true);
+			zoom(target);
+			if (!document.querySelector('.parent')) {
+				// we have basically done a clearzoom so clear the url
+				var params = get_params();
+				if (params.x) delete params.x;
+				if (params.y) delete params.y;
+				history.replaceState(null, null, parse_params(params));
+				unzoombtn.classList.add("hide");
+				return;
+			}
+
+			// set parameters for zoom state
+			var el = target.querySelector("rect");
+			if (el && el.attributes && el.attributes.y && el.attributes._orig_x) {
+				var params = get_params()
+				params.x = el.attributes._orig_x.value;
+				params.y = el.attributes.y.value;
+				history.replaceState(null, null, parse_params(params));
+			}
+		}
+		else if (e.target.id == "unzoom") clearzoom();
+		else if (e.target.id == "search") search_prompt();
+		else if (e.target.id == "ignorecase") toggle_ignorecase();
+	}, false)
+
+	// mouse-over for info
+	// show
+	window.addEventListener("mouseover", function(e) {
+		var target = find_group(e.target);
+		if (target) details.nodeValue = "Function: " + g_to_text(target);
+	}, false)
+
+	// clear
+	window.addEventListener("mouseout", function(e) {
+		var target = find_group(e.target);
+		if (target) details.nodeValue = ' ';
+	}, false)
+
+	// ctrl-F for search
+	// ctrl-I to toggle case-sensitive search
+	window.addEventListener("keydown",function (e) {
+		if (e.keyCode === 114 || (e.ctrlKey && e.keyCode === 70)) {
+			e.preventDefault();
+			search_prompt();
+		}
+		else if (e.ctrlKey && e.keyCode === 73) {
+			e.preventDefault();
+			toggle_ignorecase();
+		}
+	}, false)
+
+	// functions
+	function get_params() {
+		var params = {};
+		var paramsarr = window.location.search.substr(1).split('&');
+		for (var i = 0; i < paramsarr.length; ++i) {
+			var tmp = paramsarr[i].split("=");
+			if (!tmp[0] || !tmp[1]) continue;
+			params[tmp[0]]  = decodeURIComponent(tmp[1]);
+		}
+		return params;
+	}
+	function parse_params(params) {
+		var uri = "?";
+		for (var key in params) {
+			uri += key + '=' + encodeURIComponent(params[key]) + '&';
+		}
+		if (uri.slice(-1) == "&")
+			uri = uri.substring(0, uri.length - 1);
+		if (uri == '?')
+			uri = window.location.href.split('?')[0];
+		return uri;
+	}
+	function find_child(node, selector) {
+		var children = node.querySelectorAll(selector);
+		if (children.length) return children[0];
+	}
+	function find_group(node) {
+		var parent = node.parentElement;
+		if (!parent) return;
+		if (parent.id == "frames") return node;
+		return find_group(parent);
+	}
+	function orig_save(e, attr, val) {
+		if (e.attributes["_orig_" + attr] != undefined) return;
+		if (e.attributes[attr] == undefined) return;
+		if (val == undefined) val = e.attributes[attr].value;
+		e.setAttribute("_orig_" + attr, val);
+	}
+	function orig_load(e, attr) {
+		if (e.attributes["_orig_"+attr] == undefined) return;
+		e.attributes[attr].value = e.attributes["_orig_" + attr].value;
+		e.removeAttribute("_orig_"+attr);
+	}
+	function g_to_text(e) {
+		var text = find_child(e, "title").firstChild.nodeValue;
+		return (text)
+	}
+	function g_to_func(e) {
+		var func = g_to_text(e);
+		// if there's any manipulation we want to do to the function
+		// name before it's searched, do it here before returning.
+		return (func);
+	}
+	function update_text(e) {
+		var r = find_child(e, "rect");
+		var t = find_child(e, "text");
+		var w = parseFloat(r.attributes.width.value) -3;
+		var txt = find_child(e, "title").textContent.replace(/\([^(]*\)$/,"");
+		t.attributes.x.value = parseFloat(r.attributes.x.value) + 3;
+
+		// Smaller than this size won't fit anything
+		if (w < 2 * 12 * 0.59) {
+			t.textContent = "";
+			return;
+		}
+
+		t.textContent = txt;
+		var sl = t.getSubStringLength(0, txt.length);
+		// check if only whitespace or if we can fit the entire string into width w
+		if (/^ *$/.test(txt) || sl < w)
+			return;
+
+		// this isn't perfect, but gives a good starting point
+		// and avoids calling getSubStringLength too often
+		var start = Math.floor((w/sl) * txt.length);
+		for (var x = start; x > 0; x = x-2) {
+			if (t.getSubStringLength(0, x + 2) <= w) {
+				t.textContent = txt.substring(0, x) + "..";
+				return;
+			}
+		}
+		t.textContent = "";
+	}
+
+	// zoom
+	function zoom_reset(e) {
+		if (e.attributes != undefined) {
+			orig_load(e, "x");
+			orig_load(e, "width");
+		}
+		if (e.childNodes == undefined) return;
+		for (var i = 0, c = e.childNodes; i < c.length; i++) {
+			zoom_reset(c[i]);
+		}
+	}
+	function zoom_child(e, x, ratio) {
+		if (e.attributes != undefined) {
+			if (e.attributes.x != undefined) {
+				orig_save(e, "x");
+				e.attributes.x.value = (parseFloat(e.attributes.x.value) - x - 10) * ratio + 10;
+				if (e.tagName == "text")
+					e.attributes.x.value = find_child(e.parentNode, "rect[x]").attributes.x.value + 3;
+			}
+			if (e.attributes.width != undefined) {
+				orig_save(e, "width");
+				e.attributes.width.value = parseFloat(e.attributes.width.value) * ratio;
+			}
+		}
+
+		if (e.childNodes == undefined) return;
+		for (var i = 0, c = e.childNodes; i < c.length; i++) {
+			zoom_child(c[i], x - 10, ratio);
+		}
+	}
+	function zoom_parent(e) {
+		if (e.attributes) {
+			if (e.attributes.x != undefined) {
+				orig_save(e, "x");
+				e.attributes.x.value = 10;
+			}
+			if (e.attributes.width != undefined) {
+				orig_save(e, "width");
+				e.attributes.width.value = parseInt(svg.width.baseVal.value) - (10 * 2);
+			}
+		}
+		if (e.childNodes == undefined) return;
+		for (var i = 0, c = e.childNodes; i < c.length; i++) {
+			zoom_parent(c[i]);
+		}
+	}
+	function zoom(node) {
+		var attr = find_child(node, "rect").attributes;
+		var width = parseFloat(attr.width.value);
+		var xmin = parseFloat(attr.x.value);
+		var xmax = parseFloat(xmin + width);
+		var ymin = parseFloat(attr.y.value);
+		var ratio = (svg.width.baseVal.value - 2 * 10) / width;
+
+		// XXX: Workaround for JavaScript float issues (fix me)
+		var fudge = 0.0001;
+
+		unzoombtn.classList.remove("hide");
+
+		var el = document.getElementById("frames").children;
+		for (var i = 0; i < el.length; i++) {
+			var e = el[i];
+			var a = find_child(e, "rect").attributes;
+			var ex = parseFloat(a.x.value);
+			var ew = parseFloat(a.width.value);
+			var upstack;
+			// Is it an ancestor
+			if (0 == 0) {
+				upstack = parseFloat(a.y.value) > ymin;
+			} else {
+				upstack = parseFloat(a.y.value) < ymin;
+			}
+			if (upstack) {
+				// Direct ancestor
+				if (ex <= xmin && (ex+ew+fudge) >= xmax) {
+					e.classList.add("parent");
+					zoom_parent(e);
+					update_text(e);
+				}
+				// not in current path
+				else
+					e.classList.add("hide");
+			}
+			// Children maybe
+			else {
+				// no common path
+				if (ex < xmin || ex + fudge >= xmax) {
+					e.classList.add("hide");
+				}
+				else {
+					zoom_child(e, xmin, ratio);
+					update_text(e);
+				}
+			}
+		}
+		search();
+	}
+	function unzoom(dont_update_text) {
+		unzoombtn.classList.add("hide");
+		var el = document.getElementById("frames").children;
+		for(var i = 0; i < el.length; i++) {
+			el[i].classList.remove("parent");
+			el[i].classList.remove("hide");
+			zoom_reset(el[i]);
+			if(!dont_update_text) update_text(el[i]);
+		}
+		search();
+	}
+	function clearzoom() {
+		unzoom();
+
+		// remove zoom state
+		var params = get_params();
+		if (params.x) delete params.x;
+		if (params.y) delete params.y;
+		history.replaceState(null, null, parse_params(params));
+	}
+
+	// search
+	function toggle_ignorecase() {
+		ignorecase = !ignorecase;
+		if (ignorecase) {
+			ignorecaseBtn.classList.add("show");
+		} else {
+			ignorecaseBtn.classList.remove("show");
+		}
+		reset_search();
+		search();
+	}
+	function reset_search() {
+		var el = document.querySelectorAll("#frames rect");
+		for (var i = 0; i < el.length; i++) {
+			orig_load(el[i], "fill")
+		}
+		var params = get_params();
+		delete params.s;
+		history.replaceState(null, null, parse_params(params));
+	}
+	function search_prompt() {
+		if (!searching) {
+			var term = prompt("Enter a search term (regexp " +
+			    "allowed, eg: ^ext4_)"
+			    + (ignorecase ? ", ignoring case" : "")
+			    + "\nPress Ctrl-i to toggle case sensitivity", "");
+			if (term != null) search(term);
+		} else {
+			reset_search();
+			searching = 0;
+			currentSearchTerm = null;
+			searchbtn.classList.remove("show");
+			searchbtn.firstChild.nodeValue = "Search"
+			matchedtxt.classList.add("hide");
+			matchedtxt.firstChild.nodeValue = ""
+		}
+	}
+	function search(term) {
+		if (term) currentSearchTerm = term;
+
+		var re = new RegExp(currentSearchTerm, ignorecase ? 'i' : '');
+		var el = document.getElementById("frames").children;
+		var matches = new Object();
+		var maxwidth = 0;
+		for (var i = 0; i < el.length; i++) {
+			var e = el[i];
+			var func = g_to_func(e);
+			var rect = find_child(e, "rect");
+			if (func == null || rect == null)
+				continue;
+
+			// Save max width. Only works as we have a root frame
+			var w = parseFloat(rect.attributes.width.value);
+			if (w > maxwidth)
+				maxwidth = w;
+
+			if (func.match(re)) {
+				// highlight
+				var x = parseFloat(rect.attributes.x.value);
+				orig_save(rect, "fill");
+				rect.attributes.fill.value = "rgb(230,0,230)";
+
+				// remember matches
+				if (matches[x] == undefined) {
+					matches[x] = w;
+				} else {
+					if (w > matches[x]) {
+						// overwrite with parent
+						matches[x] = w;
+					}
+				}
+				searching = 1;
+			}
+		}
+		if (!searching)
+			return;
+		var params = get_params();
+		params.s = currentSearchTerm;
+		history.replaceState(null, null, parse_params(params));
+
+		searchbtn.classList.add("show");
+		searchbtn.firstChild.nodeValue = "Reset Search";
+
+		// calculate percent matched, excluding vertical overlap
+		var count = 0;
+		var lastx = -1;
+		var lastw = 0;
+		var keys = Array();
+		for (k in matches) {
+			if (matches.hasOwnProperty(k))
+				keys.push(k);
+		}
+		// sort the matched frames by their x location
+		// ascending, then width descending
+		keys.sort(function(a, b){
+			return a - b;
+		});
+		// Step through frames saving only the biggest bottom-up frames
+		// thanks to the sort order. This relies on the tree property
+		// where children are always smaller than their parents.
+		var fudge = 0.0001;	// JavaScript floating point
+		for (var k in keys) {
+			var x = parseFloat(keys[k]);
+			var w = matches[keys[k]];
+			if (x >= lastx + lastw - fudge) {
+				count += w;
+				lastx = x;
+				lastw = w;
+			}
+		}
+		// display matched percent
+		matchedtxt.classList.remove("hide");
+		var pct = 100 * count / maxwidth;
+		if (pct != 100) pct = pct.toFixed(1)
+		matchedtxt.firstChild.nodeValue = "Matched: " + pct + "%";
+	}
+]]>
+</script>
+<rect x="0.0" y="0" width="800.0" height="310.0" fill="url(#background)"  />
+<text id="title" x="400.00" y="24" >Flame Graph</text>
+<text id="details" x="10.00" y="293" > </text>
+<text id="unzoom" x="10.00" y="24" class="hide">Reset Zoom</text>
+<text id="search" x="690.00" y="24" >Search</text>
+<text id="ignorecase" x="774.00" y="24" >ic</text>
+<text id="matched" x="690.00" y="293" > </text>
+<g id="frames">
+<g >
+<title>bfs|graph.h:116[r] (832 samples, 0.26%)</title><rect x="191.4" y="117" width="2.1" height="15.0" fill="rgb(100,200,200)" rx="2" ry="2" />
+<text  x="194.43" y="127.5" ></text>
+</g>
+<g >
+<title>bfs|0x55ccde2849ee (318,914 samples, 100.00%)</title><rect x="10.0" y="245" width="780.0" height="15.0" fill="rgb(197,197,197)" rx="2" ry="2" />
+<text  x="13.00" y="255.5" >bfs|0x55ccde2849ee</text>
+</g>
+<g >
+<title>libc-2.31.so|0x7f7c73e30990[w] (131 samples, 0.04%)</title><rect x="119.9" y="85" width="0.3" height="15.0" fill="rgb(207,61,61)" rx="2" ry="2" />
+<text  x="122.90" y="95.5" ></text>
+</g>
+<g >
+<title>bfs|builder.h:304 (2,055 samples, 0.64%)</title><rect x="278.7" y="165" width="5.1" height="15.0" fill="rgb(200,200,200)" rx="2" ry="2" />
+<text  x="281.73" y="175.5" ></text>
+</g>
+<g >
+<title>bfs|stl_algo.h:1915 (5,958 samples, 1.87%)</title><rect x="34.1" y="85" width="14.6" height="15.0" fill="rgb(195,195,195)" rx="2" ry="2" />
+<text  x="37.09" y="95.5" ></text>
+</g>
+<g >
+<title>bfs|bfs.cc:256 (305,693 samples, 95.85%)</title><rect x="10.1" y="213" width="747.6" height="15.0" fill="rgb(188,188,188)" rx="2" ry="2" />
+<text  x="13.05" y="223.5" >bfs|bfs.cc:256</text>
+</g>
+<g >
+<title>bfs|predefined_ops.h:43[r] (2,587 samples, 0.81%)</title><rect x="15.1" y="69" width="6.3" height="15.0" fill="rgb(100,200,200)" rx="2" ry="2" />
+<text  x="18.10" y="79.5" ></text>
+</g>
+<g >
+<title>libc-2.31.so|0x7f7c73e30a22[w] (585 samples, 0.18%)</title><rect x="134.0" y="85" width="1.4" height="15.0" fill="rgb(224,86,86)" rx="2" ry="2" />
+<text  x="136.98" y="95.5" ></text>
+</g>
+<g >
+<title>bfs|sliding_queue.h:107 (96 samples, 0.03%)</title><rect x="789.7" y="117" width="0.2" height="15.0" fill="rgb(198,198,198)" rx="2" ry="2" />
+<text  x="792.69" y="127.5" ></text>
+</g>
+<g >
+<title>bfs|bfs.cc:259 (13,199 samples, 4.14%)</title><rect x="757.7" y="181" width="32.3" height="15.0" fill="rgb(197,197,197)" rx="2" ry="2" />
+<text  x="760.69" y="191.5" >bf..</text>
+</g>
+<g >
+<title>libc-2.31.so|0x7f7c73e30a84[r] (8,929 samples, 2.80%)</title><rect x="141.3" y="85" width="21.8" height="15.0" fill="rgb(100,200,200)" rx="2" ry="2" />
+<text  x="144.26" y="95.5" >l..</text>
+</g>
+<g >
+<title>libc-2.31.so|0x7f7c73e30a27[w] (913 samples, 0.29%)</title><rect x="135.4" y="85" width="2.2" height="15.0" fill="rgb(209,64,64)" rx="2" ry="2" />
+<text  x="138.41" y="95.5" ></text>
+</g>
+<g >
+<title>bfs|sliding_queue.h:100 (96 samples, 0.03%)</title><rect x="789.7" y="133" width="0.2" height="15.0" fill="rgb(187,187,187)" rx="2" ry="2" />
+<text  x="792.69" y="143.5" ></text>
+</g>
+<g >
+<title>bfs|stl_algo.h:4874 (13,775 samples, 4.32%)</title><rect x="15.1" y="149" width="33.7" height="15.0" fill="rgb(183,183,183)" rx="2" ry="2" />
+<text  x="18.10" y="159.5" >bf..</text>
+</g>
+<g >
+<title>bfs|bfs.cc:76 (3)[r] (102 samples, 0.03%)</title><rect x="789.4" y="149" width="0.3" height="15.0" fill="rgb(100,200,200)" rx="2" ry="2" />
+<text  x="792.44" y="159.5" ></text>
+</g>
+<g >
+<title>all (318,928 samples, 100%)</title><rect x="10.0" y="261" width="780.0" height="15.0" fill="rgb(201,201,201)" rx="2" ry="2" />
+<text  x="13.00" y="271.5" ></text>
+</g>
+<g >
+<title>bfs|builder.h:312 (10,221 samples, 3.20%)</title><rect x="562.6" y="165" width="25.0" height="15.0" fill="rgb(178,178,178)" rx="2" ry="2" />
+<text  x="565.57" y="175.5" >b..</text>
+</g>
+<g >
+<title>bfs|stl_algobase.h:387 (96 samples, 0.03%)</title><rect x="789.7" y="53" width="0.2" height="15.0" fill="rgb(180,180,180)" rx="2" ry="2" />
+<text  x="792.69" y="63.5" ></text>
+</g>
+<g >
+<title>bfs|builder.h:160 (2,057 samples, 0.64%)</title><rect x="51.3" y="165" width="5.0" height="15.0" fill="rgb(176,176,176)" rx="2" ry="2" />
+<text  x="54.30" y="175.5" ></text>
+</g>
+<g >
+<title>libc-2.31.so|0x7f7c73e30a58[w] (223 samples, 0.07%)</title><rect x="138.8" y="85" width="0.6" height="15.0" fill="rgb(229,93,93)" rx="2" ry="2" />
+<text  x="141.81" y="95.5" ></text>
+</g>
+<g >
+<title>libc-2.31.so|0x7f7c73e309f7[r] (481 samples, 0.15%)</title><rect x="126.9" y="85" width="1.2" height="15.0" fill="rgb(100,200,200)" rx="2" ry="2" />
+<text  x="129.90" y="95.5" ></text>
+</g>
+<g >
+<title>bfs|bfs.cc:129 (2,481 samples, 0.78%)</title><rect x="757.7" y="165" width="6.1" height="15.0" fill="rgb(190,190,190)" rx="2" ry="2" />
+<text  x="760.69" y="175.5" ></text>
+</g>
+<g >
+<title>bfs|stl_algo.h:1910 (1,451 samples, 0.45%)</title><rect x="30.5" y="85" width="3.6" height="15.0" fill="rgb(203,203,203)" rx="2" ry="2" />
+<text  x="33.54" y="95.5" ></text>
+</g>
+<g >
+<title>bfs|move.h:195[p] (2,190 samples, 0.69%)</title><rect x="43.3" y="53" width="5.4" height="15.0" fill="rgb(202,202,59)" rx="2" ry="2" />
+<text  x="46.30" y="63.5" ></text>
+</g>
+<g >
+<title>bfs|graph.h:111 (832 samples, 0.26%)</title><rect x="191.4" y="133" width="2.1" height="15.0" fill="rgb(178,178,178)" rx="2" ry="2" />
+<text  x="194.43" y="143.5" ></text>
+</g>
+<g >
+<title>bfs|builder.h:157 (1)[w] (1,025 samples, 0.32%)</title><rect x="48.8" y="165" width="2.5" height="15.0" fill="rgb(217,76,76)" rx="2" ry="2" />
+<text  x="51.79" y="175.5" ></text>
+</g>
+<g >
+<title>bfs|bfs.cc:153 (10,396 samples, 3.26%)</title><rect x="763.9" y="165" width="25.5" height="15.0" fill="rgb(171,171,171)" rx="2" ry="2" />
+<text  x="766.95" y="175.5" >b..</text>
+</g>
+<g >
+<title>libc-2.31.so|0x7f7c73e30a80[r] (426 samples, 0.13%)</title><rect x="140.2" y="85" width="1.1" height="15.0" fill="rgb(100,200,200)" rx="2" ry="2" />
+<text  x="143.22" y="95.5" ></text>
+</g>
+<g >
+<title>bfs|benchmark.h:109 (13,200 samples, 4.14%)</title><rect x="757.7" y="197" width="32.3" height="15.0" fill="rgb(201,201,201)" rx="2" ry="2" />
+<text  x="760.68" y="207.5" >bf..</text>
+</g>
+<g >
+<title>bfs|builder.h:330 (195,854 samples, 61.41%)</title><rect x="278.6" y="181" width="479.0" height="15.0" fill="rgb(181,181,181)" rx="2" ry="2" />
+<text  x="281.65" y="191.5" >bfs|builder.h:330</text>
+</g>
+<g >
+<title>bfs|stl_algo.h:1978 (51 samples, 0.02%)</title><rect x="48.7" y="133" width="0.1" height="15.0" fill="rgb(187,187,187)" rx="2" ry="2" />
+<text  x="51.66" y="143.5" ></text>
+</g>
+<g >
+<title>bfs|predefined_ops.h:43[r] (1,451 samples, 0.45%)</title><rect x="30.5" y="69" width="3.6" height="15.0" fill="rgb(100,200,200)" rx="2" ry="2" />
+<text  x="33.54" y="79.5" ></text>
+</g>
+<g >
+<title>bfs|builder.h:308[r] (32,769 samples, 10.27%)</title><rect x="288.8" y="165" width="80.1" height="15.0" fill="rgb(100,200,200)" rx="2" ry="2" />
+<text  x="291.77" y="175.5" >bfs|build..</text>
+</g>
+<g >
+<title>libc-2.31.so|0x7f7c73e30af4[w] (2,651 samples, 0.83%)</title><rect x="182.5" y="85" width="6.4" height="15.0" fill="rgb(254,129,129)" rx="2" ry="2" />
+<text  x="185.46" y="95.5" ></text>
+</g>
+<g >
+<title>bfs|stl_algo.h:81 (2,587 samples, 0.81%)</title><rect x="15.1" y="85" width="6.3" height="15.0" fill="rgb(203,203,203)" rx="2" ry="2" />
+<text  x="18.10" y="95.5" ></text>
+</g>
+<g >
+<title>libc-2.31.so|0x7f7c73e30a5c[w] (250 samples, 0.08%)</title><rect x="139.4" y="85" width="0.6" height="15.0" fill="rgb(212,67,67)" rx="2" ry="2" />
+<text  x="142.35" y="95.5" ></text>
+</g>
+<g >
+<title>bfs|bfs.cc:118 (4)[w] (1,025 samples, 0.32%)</title><rect x="757.7" y="149" width="2.5" height="15.0" fill="rgb(241,110,110)" rx="2" ry="2" />
+<text  x="760.69" y="159.5" ></text>
+</g>
+<g >
+<title>bfs|builder.h:305 (4) (2,051 samples, 0.64%)</title><rect x="283.8" y="165" width="5.0" height="15.0" fill="rgb(180,180,180)" rx="2" ry="2" />
+<text  x="286.75" y="175.5" ></text>
+</g>
+<g >
+<title>libc-2.31.so|0x7f7c73e30aea[w] (2,570 samples, 0.81%)</title><rect x="169.8" y="85" width="6.3" height="15.0" fill="rgb(233,98,98)" rx="2" ry="2" />
+<text  x="172.81" y="95.5" ></text>
+</g>
+<g >
+<title>libc-2.31.so|0x7f7c73e309a8[r] (334 samples, 0.10%)</title><rect x="122.1" y="85" width="0.8" height="15.0" fill="rgb(100,200,200)" rx="2" ry="2" />
+<text  x="125.07" y="95.5" ></text>
+</g>
+<g >
+<title>bfs|stl_algo.h:1929 (10,199 samples, 3.20%)</title><rect x="23.7" y="101" width="25.0" height="15.0" fill="rgb(191,191,191)" rx="2" ry="2" />
+<text  x="26.72" y="111.5" >b..</text>
+</g>
+<g >
+<title>bfs|stl_algo.h:1976 (13,724 samples, 4.30%)</title><rect x="15.1" y="133" width="33.6" height="15.0" fill="rgb(179,179,179)" rx="2" ry="2" />
+<text  x="18.10" y="143.5" >bf..</text>
+</g>
+<g >
+<title>bfs|platform_atomics.h:114[p] (5,118 samples, 1.60%)</title><rect x="575.1" y="149" width="12.5" height="15.0" fill="rgb(219,219,66)" rx="2" ry="2" />
+<text  x="578.05" y="159.5" ></text>
+</g>
+<g >
+<title>bfs|generator.h:98 (2)[w] (1,025 samples, 0.32%)</title><rect x="276.1" y="149" width="2.5" height="15.0" fill="rgb(238,105,105)" rx="2" ry="2" />
+<text  x="279.14" y="159.5" ></text>
+</g>
+<g >
+<title>bfs|builder.h:163 (2) (53,189 samples, 16.68%)</title><rect x="61.3" y="165" width="130.1" height="15.0" fill="rgb(197,197,197)" rx="2" ry="2" />
+<text  x="64.34" y="175.5" >bfs|builder.h:16..</text>
+</g>
+<g >
+<title>bfs|stl_algo.h:1907 (2,790 samples, 0.87%)</title><rect x="23.7" y="85" width="6.8" height="15.0" fill="rgb(194,194,194)" rx="2" ry="2" />
+<text  x="26.72" y="95.5" ></text>
+</g>
+<g >
+<title>bfs|graph.h:111 (2,047 samples, 0.64%)</title><rect x="10.1" y="133" width="5.0" height="15.0" fill="rgb(191,191,191)" rx="2" ry="2" />
+<text  x="13.09" y="143.5" ></text>
+</g>
+<g >
+<title>bfs|builder.h:312[w] (69,531 samples, 21.80%)</title><rect x="587.6" y="165" width="170.0" height="15.0" fill="rgb(222,82,82)" rx="2" ry="2" />
+<text  x="590.57" y="175.5" >bfs|builder.h:312[w]</text>
+</g>
+<g >
+<title>libc-2.31.so|0x7f7c73e30997[r] (475 samples, 0.15%)</title><rect x="120.2" y="85" width="1.2" height="15.0" fill="rgb(100,200,200)" rx="2" ry="2" />
+<text  x="123.22" y="95.5" ></text>
+</g>
+<g >
+<title>libc-2.31.so|0x7f7c73e309f2[r] (462 samples, 0.14%)</title><rect x="125.8" y="85" width="1.1" height="15.0" fill="rgb(100,200,200)" rx="2" ry="2" />
+<text  x="128.77" y="95.5" ></text>
+</g>
+<g >
+<title>bfs|stl_algobase.h:440 (96 samples, 0.03%)</title><rect x="789.7" y="85" width="0.2" height="15.0" fill="rgb(179,179,179)" rx="2" ry="2" />
+<text  x="792.69" y="95.5" ></text>
+</g>
+<g >
+<title>libc-2.31.so|0x7f7c73e30927[r] (833 samples, 0.26%)</title><rect x="61.3" y="85" width="2.1" height="15.0" fill="rgb(100,200,200)" rx="2" ry="2" />
+<text  x="64.34" y="95.5" ></text>
+</g>
+<g >
+<title>bfs|builder.h:131 (2)[w] (2,049 samples, 0.64%)</title><rect x="278.7" y="149" width="5.1" height="15.0" fill="rgb(250,123,123)" rx="2" ry="2" />
+<text  x="281.74" y="159.5" ></text>
+</g>
+<g >
+<title>libc-2.31.so|0x7f7c73e30986[r] (88 samples, 0.03%)</title><rect x="118.6" y="85" width="0.2" height="15.0" fill="rgb(100,200,200)" rx="2" ry="2" />
+<text  x="121.62" y="95.5" ></text>
+</g>
+<g >
+<title>libc-2.31.so|0x7f7c73e30a18[w] (605 samples, 0.19%)</title><rect x="131.0" y="85" width="1.5" height="15.0" fill="rgb(240,108,108)" rx="2" ry="2" />
+<text  x="134.05" y="95.5" ></text>
+</g>
+<g >
+<title>libc-2.31.so|0x7f7c73e30a4c[r] (84 samples, 0.03%)</title><rect x="138.6" y="85" width="0.2" height="15.0" fill="rgb(100,200,200)" rx="2" ry="2" />
+<text  x="141.60" y="95.5" ></text>
+</g>
+<g >
+<title>libc-2.31.so|0x7f7c73e30982[r] (544 samples, 0.17%)</title><rect x="117.3" y="85" width="1.3" height="15.0" fill="rgb(100,200,200)" rx="2" ry="2" />
+<text  x="120.29" y="95.5" ></text>
+</g>
+<g >
+<title>libc-2.31.so|0x7f7c73e30963 (96 samples, 0.03%)</title><rect x="789.7" y="37" width="0.2" height="15.0" fill="rgb(172,172,172)" rx="2" ry="2" />
+<text  x="792.69" y="47.5" ></text>
+</g>
+<g >
+<title>bfs|stl_algo.h:96 (903 samples, 0.28%)</title><rect x="21.5" y="85" width="2.2" height="15.0" fill="rgb(194,194,194)" rx="2" ry="2" />
+<text  x="24.51" y="95.5" ></text>
+</g>
+<g >
+<title>bfs|platform_atomics.h:113[r] (5,103 samples, 1.60%)</title><rect x="562.6" y="149" width="12.5" height="15.0" fill="rgb(100,200,200)" rx="2" ry="2" />
+<text  x="565.57" y="159.5" ></text>
+</g>
+<g >
+<title>libc-2.31.so|0x7f7c73e3099f[w] (283 samples, 0.09%)</title><rect x="121.4" y="85" width="0.7" height="15.0" fill="rgb(235,100,100)" rx="2" ry="2" />
+<text  x="124.38" y="95.5" ></text>
+</g>
+<g >
+<title>libc-2.31.so|0x7f7c73e309ed[r] (442 samples, 0.14%)</title><rect x="124.7" y="85" width="1.1" height="15.0" fill="rgb(100,200,200)" rx="2" ry="2" />
+<text  x="127.69" y="95.5" ></text>
+</g>
+<g >
+<title>bfs|builder.h:356 (1) (33,811 samples, 10.60%)</title><rect x="196.0" y="197" width="82.6" height="15.0" fill="rgb(202,202,202)" rx="2" ry="2" />
+<text  x="198.96" y="207.5" >bfs|build..</text>
+</g>
+<g >
+<title>bfs|bfs.cc:265 (13,200 samples, 4.14%)</title><rect x="757.7" y="213" width="32.3" height="15.0" fill="rgb(190,190,190)" rx="2" ry="2" />
+<text  x="760.68" y="223.5" >bf..</text>
+</g>
+<g >
+<title>libc-2.31.so|0x7f7c73e30a14[w] (539 samples, 0.17%)</title><rect x="129.7" y="85" width="1.3" height="15.0" fill="rgb(246,118,118)" rx="2" ry="2" />
+<text  x="132.73" y="95.5" ></text>
+</g>
+<g >
+<title>bfs|builder.h:310[w] (68,937 samples, 21.62%)</title><rect x="394.0" y="165" width="168.6" height="15.0" fill="rgb(216,74,74)" rx="2" ry="2" />
+<text  x="396.97" y="175.5" >bfs|builder.h:310[w]</text>
+</g>
+<g >
+<title>bfs|generator.h:154 (1,028 samples, 0.32%)</title><rect x="276.1" y="165" width="2.5" height="15.0" fill="rgb(205,205,205)" rx="2" ry="2" />
+<text  x="279.13" y="175.5" ></text>
+</g>
+<g >
+<title>bfs|bfs.cc:118 (1,455 samples, 0.46%)</title><rect x="760.2" y="149" width="3.6" height="15.0" fill="rgb(201,201,201)" rx="2" ry="2" />
+<text  x="763.19" y="159.5" ></text>
+</g>
+<g >
+<title>bfs|graph.h:247 (2)[w] (2,049 samples, 0.64%)</title><rect x="283.8" y="149" width="5.0" height="15.0" fill="rgb(213,69,69)" rx="2" ry="2" />
+<text  x="286.76" y="159.5" ></text>
+</g>
+<g >
+<title>libc-2.31.so|0x7f7c73e3092b[r] (355 samples, 0.11%)</title><rect x="63.4" y="85" width="0.8" height="15.0" fill="rgb(100,200,200)" rx="2" ry="2" />
+<text  x="66.38" y="95.5" ></text>
+</g>
+<g >
+<title>libc-2.31.so|0x7f7c73e30935[w] (445 samples, 0.14%)</title><rect x="66.3" y="85" width="1.1" height="15.0" fill="rgb(253,127,127)" rx="2" ry="2" />
+<text  x="69.32" y="95.5" ></text>
+</g>
+<g >
+<title>bfs|generator.h:147 (2)[w] (32,769 samples, 10.27%)</title><rect x="196.0" y="165" width="80.1" height="15.0" fill="rgb(224,85,85)" rx="2" ry="2" />
+<text  x="198.99" y="175.5" >bfs|gener..</text>
+</g>
+<g >
+<title>bfs|graph.h:216 (2,047 samples, 0.64%)</title><rect x="10.1" y="149" width="5.0" height="15.0" fill="rgb(189,189,189)" rx="2" ry="2" />
+<text  x="13.09" y="159.5" ></text>
+</g>
+<g >
+<title>libc-2.31.so|0x7f7c73e30a43[r] (227 samples, 0.07%)</title><rect x="137.6" y="85" width="0.6" height="15.0" fill="rgb(100,200,200)" rx="2" ry="2" />
+<text  x="140.64" y="95.5" ></text>
+</g>
+<g >
+<title>bfs|stl_algobase.h:405 (96 samples, 0.03%)</title><rect x="789.7" y="69" width="0.2" height="15.0" fill="rgb(196,196,196)" rx="2" ry="2" />
+<text  x="792.69" y="79.5" ></text>
+</g>
+<g >
+<title>bfs|move.h:195[p] (901 samples, 0.28%)</title><rect x="21.5" y="53" width="2.2" height="15.0" fill="rgb(201,201,59)" rx="2" ry="2" />
+<text  x="24.51" y="63.5" ></text>
+</g>
+<g >
+<title>bfs|builder.h:176 (76,012 samples, 23.83%)</title><rect x="10.1" y="181" width="185.9" height="15.0" fill="rgb(172,172,172)" rx="2" ry="2" />
+<text  x="13.05" y="191.5" >bfs|builder.h:176</text>
+</g>
+<g >
+<title>bfs|stl_algobase.h:475 (96 samples, 0.03%)</title><rect x="789.7" y="101" width="0.2" height="15.0" fill="rgb(196,196,196)" rx="2" ry="2" />
+<text  x="792.69" y="111.5" ></text>
+</g>
+<g >
+<title>libc-2.31.so|0x7f7c73e30963 (20,394 samples, 6.39%)</title><rect x="67.4" y="85" width="49.9" height="15.0" fill="rgb(203,203,203)" rx="2" ry="2" />
+<text  x="70.41" y="95.5" >libc-..</text>
+</g>
+<g >
+<title>bfs|graph.h:206[r] (1,455 samples, 0.46%)</title><rect x="760.2" y="133" width="3.6" height="15.0" fill="rgb(100,200,200)" rx="2" ry="2" />
+<text  x="763.19" y="143.5" ></text>
+</g>
+<g >
+<title>bfs|stl_algobase.h:387 (53,189 samples, 16.68%)</title><rect x="61.3" y="101" width="130.1" height="15.0" fill="rgb(185,185,185)" rx="2" ry="2" />
+<text  x="64.34" y="111.5" >bfs|stl_algobase..</text>
+</g>
+<g >
+<title>libc-2.31.so|0x7f7c73e309ae[w] (129 samples, 0.04%)</title><rect x="122.9" y="85" width="0.3" height="15.0" fill="rgb(253,128,128)" rx="2" ry="2" />
+<text  x="125.89" y="95.5" ></text>
+</g>
+<g >
+<title>bfs|stl_algo.h:1958 (13,723 samples, 4.30%)</title><rect x="15.1" y="117" width="33.6" height="15.0" fill="rgb(170,170,170)" rx="2" ry="2" />
+<text  x="18.10" y="127.5" >bf..</text>
+</g>
+<g >
+<title>libc-2.31.so|0x7f7c73e30a1d[w] (592 samples, 0.19%)</title><rect x="132.5" y="85" width="1.5" height="15.0" fill="rgb(254,129,129)" rx="2" ry="2" />
+<text  x="135.53" y="95.5" ></text>
+</g>
+<g >
+<title>bfs|stl_algobase.h:440 (53,189 samples, 16.68%)</title><rect x="61.3" y="133" width="130.1" height="15.0" fill="rgb(170,170,170)" rx="2" ry="2" />
+<text  x="64.34" y="143.5" >bfs|stl_algobase..</text>
+</g>
+<g >
+<title>bfs|graph.h:247 (2)[w] (2,049 samples, 0.64%)</title><rect x="56.3" y="149" width="5.0" height="15.0" fill="rgb(252,125,125)" rx="2" ry="2" />
+<text  x="59.33" y="159.5" ></text>
+</g>
+<g >
+<title>bfs|generator.h:164 (1) (33,811 samples, 10.60%)</title><rect x="196.0" y="181" width="82.6" height="15.0" fill="rgb(186,186,186)" rx="2" ry="2" />
+<text  x="198.96" y="191.5" >bfs|gener..</text>
+</g>
+<g >
+<title>bfs|stl_algobase.h:475 (53,189 samples, 16.68%)</title><rect x="61.3" y="149" width="130.1" height="15.0" fill="rgb(202,202,202)" rx="2" ry="2" />
+<text  x="64.34" y="159.5" >bfs|stl_algobase..</text>
+</g>
+<g >
+<title>bfs|stl_algobase.h:405 (53,189 samples, 16.68%)</title><rect x="61.3" y="117" width="130.1" height="15.0" fill="rgb(204,204,204)" rx="2" ry="2" />
+<text  x="64.34" y="127.5" >bfs|stl_algobase..</text>
+</g>
+<g >
+<title>bfs|move.h:194[p] (3,768 samples, 1.18%)</title><rect x="34.1" y="53" width="9.2" height="15.0" fill="rgb(179,179,51)" rx="2" ry="2" />
+<text  x="37.09" y="63.5" ></text>
+</g>
+<g >
+<title>bfs|platform_atomics.h:113[r] (5,119 samples, 1.61%)</title><rect x="368.9" y="149" width="12.5" height="15.0" fill="rgb(100,200,200)" rx="2" ry="2" />
+<text  x="371.91" y="159.5" ></text>
+</g>
+<g >
+<title>libc-2.31.so|0x7f7c73e30a47[r] (166 samples, 0.05%)</title><rect x="138.2" y="85" width="0.4" height="15.0" fill="rgb(100,200,200)" rx="2" ry="2" />
+<text  x="141.20" y="95.5" ></text>
+</g>
+<g >
+<title>bfs|builder.h:310 (10,246 samples, 3.21%)</title><rect x="368.9" y="165" width="25.1" height="15.0" fill="rgb(174,174,174)" rx="2" ry="2" />
+<text  x="371.91" y="175.5" >b..</text>
+</g>
+<g >
+<title>libc-2.31.so|0x7f7c73e3098c[w] (436 samples, 0.14%)</title><rect x="118.8" y="85" width="1.1" height="15.0" fill="rgb(211,66,66)" rx="2" ry="2" />
+<text  x="121.83" y="95.5" ></text>
+</g>
+<g >
+<title>libc-2.31.so|0x7f7c73e30a61[w] (105 samples, 0.03%)</title><rect x="140.0" y="85" width="0.2" height="15.0" fill="rgb(216,74,74)" rx="2" ry="2" />
+<text  x="142.96" y="95.5" ></text>
+</g>
+<g >
+<title>libc-2.31.so|0x7f7c73e309e9[r] (606 samples, 0.19%)</title><rect x="123.2" y="85" width="1.5" height="15.0" fill="rgb(100,200,200)" rx="2" ry="2" />
+<text  x="126.20" y="95.5" ></text>
+</g>
+<g >
+<title>libc-2.31.so|0x7f7c73e30b09[w] (1,017 samples, 0.32%)</title><rect x="188.9" y="85" width="2.5" height="15.0" fill="rgb(204,55,55)" rx="2" ry="2" />
+<text  x="191.94" y="95.5" ></text>
+</g>
+<g >
+<title>bfs|builder.h:155 (13,775 samples, 4.32%)</title><rect x="15.1" y="165" width="33.7" height="15.0" fill="rgb(196,196,196)" rx="2" ry="2" />
+<text  x="18.10" y="175.5" >bf..</text>
+</g>
+<g >
+<title>bfs|predefined_ops.h:43[r] (2,790 samples, 0.87%)</title><rect x="23.7" y="69" width="6.8" height="15.0" fill="rgb(100,200,200)" rx="2" ry="2" />
+<text  x="26.72" y="79.5" ></text>
+</g>
+<g >
+<title>bfs|stl_algo.h:1896 (51 samples, 0.02%)</title><rect x="48.7" y="117" width="0.1" height="15.0" fill="rgb(177,177,177)" rx="2" ry="2" />
+<text  x="51.66" y="127.5" ></text>
+</g>
+<g >
+<title>bfs|platform_atomics.h:114[p] (5,127 samples, 1.61%)</title><rect x="381.4" y="149" width="12.6" height="15.0" fill="rgb(184,184,53)" rx="2" ry="2" />
+<text  x="384.43" y="159.5" ></text>
+</g>
+<g >
+<title>libc-2.31.so|0x7f7c73cc9083 (318,914 samples, 100.00%)</title><rect x="10.0" y="229" width="780.0" height="15.0" fill="rgb(188,188,188)" rx="2" ry="2" />
+<text  x="13.00" y="239.5" >libc-2.31.so|0x7f7c73cc9083</text>
+</g>
+<g >
+<title>bfs|stl_algobase.h:153 (5,958 samples, 1.87%)</title><rect x="34.1" y="69" width="14.6" height="15.0" fill="rgb(204,204,204)" rx="2" ry="2" />
+<text  x="37.09" y="79.5" ></text>
+</g>
+<g >
+<title>bfs|builder.h:161 (4) (2,051 samples, 0.64%)</title><rect x="56.3" y="165" width="5.0" height="15.0" fill="rgb(182,182,182)" rx="2" ry="2" />
+<text  x="59.33" y="175.5" ></text>
+</g>
+<g >
+<title>bfs|bfs.cc:53 (3)[r] (10,396 samples, 3.26%)</title><rect x="763.9" y="149" width="25.5" height="15.0" fill="rgb(100,200,200)" rx="2" ry="2" />
+<text  x="766.95" y="159.5" >b..</text>
+</g>
+<g >
+<title>libc-2.31.so|0x7f7c73e309fc[r] (678 samples, 0.21%)</title><rect x="128.1" y="85" width="1.6" height="15.0" fill="rgb(100,200,200)" rx="2" ry="2" />
+<text  x="131.07" y="95.5" ></text>
+</g>
+<g >
+<title>bfs|builder.h:344 (76,013 samples, 23.83%)</title><rect x="10.1" y="197" width="185.9" height="15.0" fill="rgb(186,186,186)" rx="2" ry="2" />
+<text  x="13.05" y="207.5" >bfs|builder.h:344</text>
+</g>
+<g >
+<title>bfs|bfs.cc:81 (113 samples, 0.04%)</title><rect x="789.7" y="149" width="0.3" height="15.0" fill="rgb(174,174,174)" rx="2" ry="2" />
+<text  x="792.69" y="159.5" ></text>
+</g>
+<g >
+<title>bfs|builder.h:131 (2)[w] (2,049 samples, 0.64%)</title><rect x="51.3" y="149" width="5.0" height="15.0" fill="rgb(241,110,110)" rx="2" ry="2" />
+<text  x="54.31" y="159.5" ></text>
+</g>
+<g >
+<title>bfs|stl_algo.h:1928 (3,524 samples, 1.10%)</title><rect x="15.1" y="101" width="8.6" height="15.0" fill="rgb(190,190,190)" rx="2" ry="2" />
+<text  x="18.10" y="111.5" ></text>
+</g>
+<g >
+<title>bfs|builder.h:167 (1) (832 samples, 0.26%)</title><rect x="191.4" y="165" width="2.1" height="15.0" fill="rgb(181,181,181)" rx="2" ry="2" />
+<text  x="194.43" y="175.5" ></text>
+</g>
+<g >
+<title>libc-2.31.so|0x7f7c73e30aef[w] (2,601 samples, 0.82%)</title><rect x="176.1" y="85" width="6.4" height="15.0" fill="rgb(239,107,107)" rx="2" ry="2" />
+<text  x="179.09" y="95.5" ></text>
+</g>
+<g >
+<title>bfs|builder.h:358 (1) (195,856 samples, 61.41%)</title><rect x="278.6" y="197" width="479.1" height="15.0" fill="rgb(171,171,171)" rx="2" ry="2" />
+<text  x="281.65" y="207.5" >bfs|builder.h:358 (1)</text>
+</g>
+<g >
+<title>bfs|builder.h:151 (1) (2,047 samples, 0.64%)</title><rect x="10.1" y="165" width="5.0" height="15.0" fill="rgb(194,194,194)" rx="2" ry="2" />
+<text  x="13.09" y="175.5" ></text>
+</g>
+<g >
+<title>bfs|graph.h:116[r] (2,047 samples, 0.64%)</title><rect x="10.1" y="117" width="5.0" height="15.0" fill="rgb(100,200,200)" rx="2" ry="2" />
+<text  x="13.09" y="127.5" ></text>
+</g>
+<g >
+<title>bfs|bfs.cc:167 (219 samples, 0.07%)</title><rect x="789.4" y="165" width="0.6" height="15.0" fill="rgb(181,181,181)" rx="2" ry="2" />
+<text  x="792.43" y="175.5" ></text>
+</g>
+<g >
+<title>bfs|builder.h:168[r] (1,008 samples, 0.32%)</title><rect x="193.5" y="165" width="2.4" height="15.0" fill="rgb(100,200,200)" rx="2" ry="2" />
+<text  x="196.46" y="175.5" ></text>
+</g>
+<g >
+<title>bfs|graph.h:216 (832 samples, 0.26%)</title><rect x="191.4" y="149" width="2.1" height="15.0" fill="rgb(206,206,206)" rx="2" ry="2" />
+<text  x="194.43" y="159.5" ></text>
+</g>
+<g >
+<title>libc-2.31.so|0x7f7c73e30931[w] (847 samples, 0.27%)</title><rect x="64.2" y="85" width="2.1" height="15.0" fill="rgb(234,99,99)" rx="2" ry="2" />
+<text  x="67.25" y="95.5" ></text>
+</g>
+<g >
+<title>bfs|stl_algobase.h:153 (903 samples, 0.28%)</title><rect x="21.5" y="69" width="2.2" height="15.0" fill="rgb(170,170,170)" rx="2" ry="2" />
+<text  x="24.51" y="79.5" ></text>
+</g>
+<g >
+<title>libc-2.31.so|0x7f7c73e30ae6[w] (2,742 samples, 0.86%)</title><rect x="163.1" y="85" width="6.7" height="15.0" fill="rgb(249,122,122)" rx="2" ry="2" />
+<text  x="166.10" y="95.5" ></text>
+</g>
+</g>
+</svg>
