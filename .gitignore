@@ -1,0 +1,8 @@
+*.d
+*.o
+*.a
+*.so
+*.svg
+*.dat
+*.out
+*.png

@@ -63,3 +63,6 @@ echo "${JE_BUILD_DIR}/lib/libjemalloc_pic.a" > je_static_libs
 echo "-I${JE_BUILD_DIR}/include" > je_includes
     
 popd
+
+# other deps
+sudo apt-get install binutils   # for addr2line

@@ -59,12 +59,12 @@ unsigned long long get_process_vm_counter(const char* name)
 /* save latest process memory map information to a local file */
 void save_process_maps()
 {
-    char ch, fname[25];
+    char ch, fname[150];
     FILE *source, *target;
 
     /* we could use system("cp") to copy the file but it creates a new 
      * process and causes issues with inherited LD_PRELOAD */
-    sprintf(fname, "procmaps-%d", getpid());
+    sprintf(fname, "fltrace-data-procmaps-%d.out", getpid());
     source = fopen("/proc/self/maps", "r");
     target = fopen(fname, "w");
     while ((ch = fgetc(source)) != EOF)
@@ -139,12 +139,12 @@ static void* stats_worker(void *arg)
     RUNTIME_ENTER();
 
     char buf[MAX_STAT_STR_LEN];
-    char fname[100];
+    char fname[150];
     unsigned long now;
     FILE* fp;
     int ret;
     
-    sprintf(fname, "fault-stats-%d.out", getpid());
+    sprintf(fname, "fltrace-data-stats-%d.out", getpid());
     fp = fopen(fname, "w");
     assert(fp);
 

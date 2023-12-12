@@ -240,7 +240,7 @@ void save_stacktrace(int signum, siginfo_t *siginfo, void *context)
 int fsampler_get_sampler()
 {
     int fsid;
-    char fsname[100];
+    char fsname[150];
 
     /* atomically g et a sampler id */
     do {
@@ -255,7 +255,7 @@ int fsampler_get_sampler()
         fsid, atomic_read(&nsamplers));
 
     /* initialize base sampler */
-    sprintf(fsname, "fault-samples-%d-%d.out", getpid(), 1 + fsid);
+    sprintf(fsname, "fltrace-data-faults-%d-%d.out", getpid(), 1 + fsid);
     sampler_init(&fsamplers[fsid].base, fsname,
         /* header= */ "tstamp,ip,addr,pages,flags,tid,trace",
         fsamples_per_sec > 0 ? SAMPLER_TYPE_POISSON : SAMPLER_TYPE_NONE,
