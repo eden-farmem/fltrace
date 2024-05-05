@@ -1,5 +1,5 @@
 /**
- * fltrace.c - Memory interposition library to forward 
+ * fltsites.c - Memory interposition library to forward 
  * all heap allocations to UFFD-registered memory and 
  * kick off a handler thread to serve them.
 */
@@ -121,30 +121,30 @@ int parse_env_settings()
 
     /* parse local memory */
     local_memory_set = false;
-    if (parse_numeric_env_setting("FLTRACE_LOCAL_MEMORY_BYTES", &val) == 0) {
+    if (parse_numeric_env_setting("fltsites_LOCAL_MEMORY_BYTES", &val) == 0) {
         local_memory = val;
         local_memory_set = true;
     }
-    if (parse_numeric_env_setting("FLTRACE_LOCAL_MEMORY_MB", &val) == 0) {
+    if (parse_numeric_env_setting("fltsites_LOCAL_MEMORY_MB", &val) == 0) {
         local_memory = val * 1024 * 1024;
         local_memory_set = true;
     }
     if (!local_memory_set || local_memory < CHUNK_SIZE) {
-        ft_log_err("ERROR! local mem must be set (FLTRACE_LOCAL_MEMORY_BYTES or"
-            " FLTRACE_LOCAL_MEMORY_MB env) with at least %d bytes", CHUNK_SIZE);
+        ft_log_err("ERROR! local mem must be set (fltsites_LOCAL_MEMORY_BYTES or"
+            " fltsites_LOCAL_MEMORY_MB env) with at least %d bytes", CHUNK_SIZE);
         return 1;
     }
 
     /* parse number of handlers */
-    if (parse_numeric_env_setting("FLTRACE_NHANDLERS", &val) == 0)
+    if (parse_numeric_env_setting("fltsites_NHANDLERS", &val) == 0)
         nhandlers = val;
 
     /* parse max backing memory */
-    if (parse_numeric_env_setting("FLTRACE_MAX_MEMORY_MB", &val) == 0)
+    if (parse_numeric_env_setting("fltsites_MAX_MEMORY_MB", &val) == 0)
         max_memory_mb = val;
 
     /* parse sampling rate */
-    if (parse_numeric_env_setting("FLTRACE_MAX_SAMPLES_PER_SEC", &val) == 0)
+    if (parse_numeric_env_setting("fltsites_MAX_SAMPLES_PER_SEC", &val) == 0)
         samples_per_sec = val;
 
     return 0;

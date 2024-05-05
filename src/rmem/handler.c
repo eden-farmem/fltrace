@@ -88,7 +88,7 @@ static inline fault_t* read_uffd_fault()
             /* we don't need other events right now; a lot of them are 
              * for reporting changes to memory layout to the handler, but 
              * we hope to handle them with memory lib interposition (see 
-             * fltrace.c) or provide explicit calls (see rmem_api.c) */
+             * fltsites.c) or provide explicit calls (see rmem_api.c) */
             log_err("uffd event %d not supported", message.event);
             BUG();
         }

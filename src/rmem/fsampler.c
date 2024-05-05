@@ -255,7 +255,7 @@ int fsampler_get_sampler()
         fsid, atomic_read(&nsamplers));
 
     /* initialize base sampler */
-    sprintf(fsname, "fltrace-data-faults-%d-%d.out", getpid(), 1 + fsid);
+    sprintf(fsname, "fltsites-data-faults-%d-%d.out", getpid(), 1 + fsid);
     sampler_init(&fsamplers[fsid].base, fsname,
         /* header= */ "tstamp,ip,addr,pages,flags,tid,trace",
         fsamples_per_sec > 0 ? SAMPLER_TYPE_POISSON : SAMPLER_TYPE_NONE,

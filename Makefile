@@ -4,7 +4,7 @@ LDFLAGS = -T src/base/base.ld -no-pie
 LD	= gcc
 CC	= gcc
 AR	= ar
-FLTRACE = fltrace.so
+fltsites = fltsites.so
 
 # Path and dir of this makefile
 MKFILE_PATH := $(abspath $(lastword $(MAKEFILE_LIST)))
@@ -72,7 +72,7 @@ rmem_obj = $(rmem_src:.c=.o)
 
 main_src = $(wildcard src/*.c)
 main_obj = $(main_src:.c=.o)
-CFLAGS += -fPIC # (fltrace is a shared library)
+CFLAGS += -fPIC # (fltsites is a shared library)
 CFLAGS += -DKEEP_PERTHREAD_DATA
 CFLAGS += -DFAULT_SAMPLER
 
@@ -81,7 +81,7 @@ CFLAGS += -DFAULT_SAMPLER
 #
 
 # (must be first target)
-all: $(FLTRACE)
+all: $(fltsites)
 
 libs: libbase.a librmem.a
 
@@ -91,10 +91,10 @@ libbase.a: $(base_obj)
 librmem.a: $(rmem_obj)
 	$(AR) rcs $@ $^
 
-# fltrace.so has to be built separately as it uses different flags
-# use "make fltrace.so"
-$(FLTRACE): $(main_obj) libs src/base/base.ld
-	$(LD) $(CFLAGS) $(LDFLAGS) -shared $(main_obj) -o $(FLTRACE)	\
+# fltsites.so has to be built separately as it uses different flags
+# use "make fltsites.so"
+$(fltsites): $(main_obj) libs src/base/base.ld
+	$(LD) $(CFLAGS) $(LDFLAGS) -shared $(main_obj) -o $(fltsites)	\
 		librmem.a libbase.a $(JEMALLOC_STATIC_LIBS) -lpthread -lm -ldl 
 
 ## general build rules for all targets
@@ -115,4 +115,4 @@ endif
 
 .PHONY: clean
 clean:
-	rm -f $(obj) $(dep) libbase.a librmem.a $(FLTRACE)
+	rm -f $(obj) $(dep) libbase.a librmem.a $(fltsites)

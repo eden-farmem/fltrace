@@ -64,7 +64,7 @@ void save_process_maps()
 
     /* we could use system("cp") to copy the file but it creates a new 
      * process and causes issues with inherited LD_PRELOAD */
-    sprintf(fname, "fltrace-data-procmaps-%d.out", getpid());
+    sprintf(fname, "fltsites-data-procmaps-%d.out", getpid());
     source = fopen("/proc/self/maps", "r");
     target = fopen(fname, "w");
     while ((ch = fgetc(source)) != EOF)
@@ -144,7 +144,7 @@ static void* stats_worker(void *arg)
     FILE* fp;
     int ret;
     
-    sprintf(fname, "fltrace-data-stats-%d.out", getpid());
+    sprintf(fname, "fltsites-data-stats-%d.out", getpid());
     fp = fopen(fname, "w");
     assert(fp);
 

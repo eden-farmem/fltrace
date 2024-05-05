@@ -1,4 +1,4 @@
-# Work with raw fltrace output to find callsites 
+# Work with raw fltsites output to find callsites 
 
 import argparse
 from enum import Enum
@@ -119,7 +119,7 @@ class FaultOp(Enum):
 
 
 class FaultType(Enum):
-    """Enumerates the fault types (defined in fltrace)"""
+    """Enumerates the fault types (defined in fltsites)"""
     REGULAR = "regular"
     ZEROPAGE = "zero"
 
