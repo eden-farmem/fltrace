@@ -1,6 +1,5 @@
 # fltrace
 Tool to capture page faults along with their callsites.
-TODO: Add more on how it works.
 
 #### Requirements
 - Linux kernel 5.9 or higher (recently tested on 5.15)
