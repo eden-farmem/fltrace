@@ -225,6 +225,16 @@ void save_stacktrace(int signum, siginfo_t *siginfo, void *context)
     /* backtrace */
     sample->trace_size = backtrace(sample->bktrace, FAULT_TRACE_STEPS);
 
+    /* get the program counter (PC) */
+    ucontext_t *uc = (ucontext_t *)context;
+    #if defined(__x86_64__)
+    sample->ip = (long unsigned int)uc->uc_mcontext.gregs[REG_RIP]; // A pointer is 64 bits, same as long unsigned int
+    #elif defined(__aarch64__)
+    sample->ip = (long unsigned int)uc->uc_mcontext.pc;
+    #else
+    #error Unsupported architecture
+    #endif
+
     /* set done */
     store_release(&sample->trace_in_progress, 0);
     log_debug("thr %d backtrace done for sampler %d", thread_gettid(), fsid);
