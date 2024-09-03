@@ -31,7 +31,7 @@ struct page_list_per_prio {
     spinlock_t locks[EVICTION_MAX_PRIO];
 };
 extern struct page_list evict_gens[EVICTION_MAX_GENS];
-struct page_list_per_prio dne_pages;
+extern struct page_list_per_prio dne_pages;
 extern int evict_gen_mask;
 extern int evict_gen_now;
 extern unsigned long evict_epoch_now;
